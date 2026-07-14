@@ -2,179 +2,95 @@
 
 ## Goals
 
-The folder structure should make boundaries visible. A developer should know where a use case, domain rule, plugin, provider adapter, database implementation, or API interface belongs without guessing.
+The folder structure should make current responsibilities obvious without creating empty layers. JobPilot AI should grow toward Clean Architecture, but the repository should only contain directories that provide value today.
 
-## Target Repository Layout
+Guiding rules:
+
+- Prefer a small number of clear directories over deep placeholder trees.
+- Add feature modules only when those features exist.
+- Add infrastructure subpackages only when there are real adapters to isolate.
+- Keep the backend approachable for a two-person engineering team.
+- Preserve a natural path to domain, application, worker, scheduler, and infrastructure layers later.
+
+## Current Repository Layout
 
 ```text
 jobpilot-ai/
   backend/
+    Dockerfile
     app/
-      main.py                  # FastAPI composition root only
-      api/                     # HTTP interface layer
-      application/             # use cases and orchestration
-      domain/                  # business model and domain services
-      infrastructure/          # adapters for DB, AI, browser, ATS, storage
-      workers/                 # background worker entrypoints and handlers
-      scheduler/               # scheduled job dispatch
-      shared/                  # cross-cutting primitives with no business logic
-    migrations/                # Alembic migrations
-  frontend/                    # future React dashboard
-  infra/                       # deployment, compose, and operational assets
-  scripts/                     # developer and operational scripts
-  tests/
-    unit/
-    integration/
-    contract/
-    e2e/
+      main.py              # FastAPI composition root
+      api/                 # HTTP routes, request middleware, HTTP error mapping
+      core/                # settings and runtime cross-cutting utilities
+  frontend/                # future React dashboard
+  infra/                   # future deployment and operational assets
+  scripts/                 # future developer and operational scripts
+  tests/                   # future test suites
   docs/
 ```
 
-This document describes the intended layout. It does not require all folders to exist before implementation.
-
-## Backend Package Layout
+## Current Backend Layout
 
 ```text
 backend/app/
+  main.py
   api/
-    dependencies/
-    dto/
-    routers/
-    error_handlers/
-
-  application/
-    companies/
-    discovery/
-    ats/
-    jobs/
-    candidates/
-    matching/
-    resumes/
-    screening/
-    applications/
-    interviews/
-    pipelines/
-
-  domain/
-    companies/
-    discovery/
-    ats/
-    jobs/
-    candidates/
-    matching/
-    resumes/
-    screening/
-    applications/
-    interviews/
-    automation/
-    ai/
-
-  infrastructure/
-    database/
-      repositories/
-      models/
-      unit_of_work/
-    ai/
-      providers/
-    ats/
-      plugins/
-    browser/
-    storage/
-    logging/
-    settings/
-
-  workers/
-    handlers/
-    runtime/
-
-  scheduler/
-    jobs/
-
-  shared/
-    errors/
-    ids/
-    time/
-    typing/
+    health.py              # /health and /ready endpoints
+    errors.py              # central HTTP exception handling
+    request_logging.py     # request/correlation logging middleware
+  core/
+    config.py              # Pydantic Settings and environment loading
+    logging.py             # structured logging setup
 ```
 
-## Layer Responsibilities
+## Current Directory Responsibilities
 
-### `domain`
+### `app`
 
-Contains framework-independent business rules:
-
-- Entities.
-- Value objects.
-- Domain services.
-- Domain events.
-- Domain errors.
-- Policy objects.
-
-Domain code must not import FastAPI, SQLAlchemy, Playwright, Ollama clients, HTTP SDKs, or environment settings.
-
-### `application`
-
-Contains use cases and orchestration:
-
-- Commands and queries.
-- Application services.
-- Pipeline coordinators.
-- Transaction boundaries.
-- Authorization checks delegated from API context.
-- Calls to repository, provider, and plugin interfaces.
-
-Application code may define interfaces that infrastructure implements.
-
-### `infrastructure`
-
-Contains adapters:
-
-- SQLAlchemy models and repositories.
-- Alembic integration.
-- Ollama and OpenAI-compatible clients.
-- Playwright browser automation.
-- ATS plugin implementations.
-- File or object storage.
-- Logging setup.
-- Settings loading.
-
-Infrastructure depends on application and domain contracts, not the reverse.
+Contains the backend Python package. `main.py` is the composition root: it creates the FastAPI app, configures logging, registers middleware, registers exception handlers, and includes API routes.
 
 ### `api`
 
-Contains the HTTP interface:
+Contains HTTP interface concerns that exist today:
 
-- FastAPI routers.
-- Request and response DTOs.
-- Dependency wiring.
-- Authentication extraction.
-- Error mapping.
+- Health and readiness endpoints.
+- HTTP exception mapping.
+- Request logging middleware.
 
-API routes should be thin and delegate to application services.
+Future request and response DTOs can live here when non-trivial API surfaces exist. Do not create nested `routers`, `dependencies`, or `dto` packages until there are enough files to justify them.
 
-### `workers`
+### `core`
 
-Contains background execution entrypoints and task handlers. Worker handlers should delegate business decisions to application services and pipeline orchestrators.
+Contains cross-cutting runtime concerns used by the application foundation:
 
-### `scheduler`
+- Configuration loading.
+- Structured logging.
 
-Contains scheduled dispatch logic. Scheduler jobs should create pipeline runs or enqueue tasks, not perform extraction or AI work directly.
+This is intentionally not a dumping ground for business logic. Domain rules, use cases, repositories, provider clients, ATS plugins, and browser automation do not belong here.
 
-### `shared`
+## Future Growth Path
 
-Contains primitives with no business-specific dependencies:
+Add directories when they solve a present problem:
 
-- Typed IDs.
-- Clock abstractions.
-- Base error classes.
-- Result helpers.
-- Serialization helpers.
-
-Do not turn `shared` into a dumping ground for domain logic.
+- Add `domain/` when business entities, value objects, domain services, or domain events are implemented.
+- Add `application/` when use cases or orchestration logic exists.
+- Add `infrastructure/` when concrete adapters exist, such as SQLAlchemy, AI providers, storage, browser automation, or ATS plugin implementations.
+- Add `workers/` when background processing exists.
+- Add `scheduler/` when scheduled dispatch exists.
+- Split `api/health.py` into `api/routers/` only after there are multiple route modules.
+- Split `core/config.py` or `core/logging.py` into packages only when each area has multiple cohesive files.
 
 ## Import Direction Rules
 
-Allowed dependency direction:
+Current allowed dependencies:
+
+```text
+main -> api/core
+api -> core
+core -> standard library and runtime dependencies
+```
+
+Future intended dependency direction:
 
 ```text
 api -> application -> domain
@@ -183,19 +99,16 @@ scheduler -> application -> domain
 infrastructure -> application/domain
 ```
 
-Disallowed:
+Disallowed now and later:
 
-- `domain` importing from `application`, `api`, or `infrastructure`.
-- `application` importing concrete SQLAlchemy models or provider SDK clients.
-- `api` directly importing SQLAlchemy models for response serialization.
-- ATS plugins mutating job records without going through application contracts.
+- Business logic in `api` or `core`.
+- Framework imports in future domain code.
+- SQLAlchemy models used directly as API response models.
+- Provider SDKs, Playwright, or ATS-specific logic imported into domain code.
 
 ## Naming Guidance
 
-- Prefer domain language over technical shortcuts.
-- Use `service` for use-case orchestration only when a more specific name is not available.
-- Use `policy` for business decision objects.
-- Use `adapter` for infrastructure implementations of external contracts.
-- Use `repository` only for persistence abstractions.
-- Use `plugin` only for ATS integration modules registered through the ATS plugin registry.
-
+- Use names from the business domain once domain code exists.
+- Use `core` only for foundation-level runtime concerns.
+- Use `infrastructure` only for concrete external adapters.
+- Use `repository`, `provider`, `plugin`, and `service` only when those concepts are actually implemented.
